@@ -1,64 +1,48 @@
-const { chromium } = require('playwright');
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 
-// Busca vuelos en Google Flights (agrega TODAS las aerolíneas del mundo)
 async function searchGoogleFlights({ origin, destination, departure_date, return_date, travelers = 1 }) {
   let browser;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true
     });
 
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      locale: 'en-US'
-    });
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    const page = await context.newPage();
+    const searchUrl = `https://www.google.com/travel/flights?hl=en&q=flights+from+${encodeURIComponent(origin)}+to+${encodeURIComponent(destination)}+${departure_date}${return_date ? '+return+' + return_date : '+one+way'}`;
+    const bookingLink = searchUrl;
 
-    // Construir URL de Google Flights
-    const tripType = return_date ? '1' : '2'; // 1=roundtrip, 2=oneway
-    let url = `https://www.google.com/travel/flights?hl=en&q=flights+from+${encodeURIComponent(origin)}+to+${encodeURIComponent(destination)}+${departure_date}`;
-    if (return_date) url += `+${return_date}`;
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
+    await new Promise(r => setTimeout(r, 5000));
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40000 });
-    await page.waitForTimeout(4000);
-
-    // Extraer resultados de vuelos
     const flights = await page.evaluate(() => {
       const results = [];
-      const items = document.querySelectorAll('[jsname="IWWDBc"], [jsname="YdtKid"]');
+      const seen = new Set();
 
-      items.forEach((item, i) => {
-        if (i >= 8) return;
+      // Google Flights renders prices in various ways — grab all price-like text
+      document.querySelectorAll('*').forEach(el => {
+        if (results.length >= 6) return;
+        const text = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3
+          ? el.textContent.trim() : '';
+        if (!text) return;
+        if (!/\$[\d,]+/.test(text) && !/[\d,]+\s*CAD/.test(text)) return;
+        if (seen.has(text)) return;
+        seen.add(text);
 
-        const priceEl = item.querySelector('[data-gs]') || item.querySelector('.YMlIz');
-        const airlineEl = item.querySelector('.h1fkLb') || item.querySelector('.Ir0Voe');
-        const timeEl = item.querySelectorAll('.zxVSec, .mv1WYe');
-        const durationEl = item.querySelector('.AdWm1c.gvkrdb') || item.querySelector('.AdWm1c');
-        const stopsEl = item.querySelector('.EfT7Ae span') || item.querySelector('.ogfYpf');
-
-        const price = priceEl?.textContent?.trim();
-        const airline = airlineEl?.textContent?.trim();
-        const duration = durationEl?.textContent?.trim();
-        const stops = stopsEl?.textContent?.trim();
-
-        if (price && airline) {
-          results.push({ price, airline, duration, stops: stops || 'Nonstop', source: 'Google Flights' });
-        }
+        const card = el.closest('li, [role="listitem"], [jsname]');
+        if (!card) return;
+        const cardText = card.innerText?.replace(/\s+/g, ' ').trim().substring(0, 250);
+        results.push({ price: text, details: cardText, source: 'Google Flights' });
       });
 
       return results;
     });
 
-    // Link directo para reservar
-    const bookingLink = `https://www.google.com/travel/flights?hl=en&q=flights+from+${encodeURIComponent(origin)}+to+${encodeURIComponent(destination)}+${departure_date}${return_date ? '+' + return_date : ''}`;
-
-    return {
-      source: 'Google Flights',
-      flights: flights.length > 0 ? flights : [],
-      bookingLink
-    };
+    return { source: 'Google Flights', flights, bookingLink };
 
   } catch (error) {
     return { source: 'Google Flights', error: error.message, flights: [] };

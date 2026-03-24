@@ -1,10 +1,13 @@
-const { chromium } = require('playwright');
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 
 // Busca alojamientos en Airbnb
 async function searchAirbnb({ destination, checkin, checkout, travelers = 1 }) {
   let browser;
   try {
-    browser = await chromium.launch({
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });

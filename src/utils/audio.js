@@ -1,30 +1,30 @@
-const Groq = require('groq-sdk');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const WHISPER_SCRIPT = path.join(__dirname, 'whisper_transcribe.py');
 
-// Transcribe an audio file using Groq Whisper (free, fast, no extra cost)
+// Transcribe audio using local Whisper — 100% free, no API key needed
 async function transcribeAudio(audioBuffer, mimeType = 'audio/ogg') {
-  // Save buffer to temp file
   const ext = mimeType.includes('ogg') ? 'ogg' :
                mimeType.includes('mp4') ? 'mp4' :
-               mimeType.includes('webm') ? 'webm' : 'ogg';
+               mimeType.includes('webm') ? 'webm' :
+               mimeType.includes('mpeg') ? 'mp3' : 'ogg';
 
   const tmpPath = path.join('/tmp', `audio_${Date.now()}.${ext}`);
   fs.writeFileSync(tmpPath, audioBuffer);
 
   try {
-    const transcription = await groq.audio.transcriptions.create({
-      file: fs.createReadStream(tmpPath),
-      model: 'whisper-large-v3-turbo', // Fast + accurate, free on Groq
-      language: 'es', // Spanish by default, auto-detects others
-      response_format: 'text'
+    const result = execSync(`python3 "${WHISPER_SCRIPT}" "${tmpPath}" es`, {
+      timeout: 60000,
+      encoding: 'utf8'
     });
 
-    return transcription;
+    const parsed = JSON.parse(result.trim());
+    if (parsed.error) throw new Error(parsed.error);
+    return parsed.transcript;
+
   } finally {
-    // Clean up temp file
     if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
   }
 }
