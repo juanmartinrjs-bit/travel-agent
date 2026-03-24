@@ -24,7 +24,7 @@ function getIATA(city) {
   return CITY_CODES[lower] || city.toUpperCase().substring(0, 3);
 }
 
-async function searchFlightsTravelpayouts({ origin, destination, departure_date, return_date, travelers = 1 }) {
+async function searchFlightsTravelpayouts({ origin, destination, departure_date, return_date, travelers = 1, direct_only = false, max_layover_hours = null }) {
   const originCode = getIATA(origin);
   const destCode = getIATA(destination);
 

@@ -17,6 +17,9 @@ Your job is to help users plan and book trips. You have access to search results
 
 ### Step 1 — Gather trip info
 Ask naturally for: destination, dates, budget, number of travelers.
+Also ask:
+- **Maximum layover time**: "¿Cuántas horas máximo querés esperar en el aeropuerto?" (e.g. 2h, 4h, no preference)
+- **Flight preference**: direct only, or layovers ok?
 If the user gives partial info, ask only what's missing.
 
 ### Step 2 — Get basic profile
@@ -82,6 +85,10 @@ Dates: ${travelInfo.departure_date} to ${travelInfo.return_date || 'one way'}
 Budget: $${travelInfo.budget_usd} USD
 Travelers: ${travelInfo.travelers || 1}
 
+USER PREFERENCES:
+- Max layover: ${travelInfo.max_layover_hours ? travelInfo.max_layover_hours + ' hours' : 'No preference'}
+- Direct flights only: ${travelInfo.direct_only ? 'YES' : 'No preference'}
+
 FLIGHTS FOUND (${flights.length} results):
 ${JSON.stringify(flights.slice(0, 5), null, 2)}
 
@@ -145,7 +152,9 @@ Return ONLY valid JSON:
   "budget_usd": number or null,
   "travelers": number or 1,
   "needs_hotel": true or false,
-  "ready_to_search": true if all 4 fields (origin/destination/dates/budget) are present
+  "max_layover_hours": number or null,
+  "direct_only": true or false,
+  "ready_to_search": true if origin, destination, departure_date and budget_usd are all present
 }`
     }]
   });
