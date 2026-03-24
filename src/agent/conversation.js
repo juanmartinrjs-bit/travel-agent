@@ -1,40 +1,34 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const { PROFILE_QUESTIONS } = require('../utils/profile');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Maneja el flujo completo de la conversación
-async function handleConversation(session, userMessage) {
-  const { travelInfo, travelerProfile } = session;
+// Preguntas básicas — solo lo necesario para arrancar
+const BASIC_QUESTIONS = [
+  { field: 'firstName', question: '¿Cuál es tu nombre?' },
+  { field: 'lastName',  question: '¿Y tu apellido?' },
+  { field: 'email',     question: '¿Cuál es tu Gmail? Lo usamos para crear tu cuenta en los sitios de reserva 📧' }
+];
 
-  // FASE 1 — No tiene info del viaje aún
-  if (!travelInfo || !travelInfo.destination) {
-    return {
-      phase: 'travel_info',
-      reply: `¡Hola! Soy tu agente de viajes personal ✈️\n\nDime a dónde querés viajar, las fechas y tu presupuesto.\n\nEjemplo: *"Quiero ir de Miami a Puerto Rico del 1 al 15 de junio, presupuesto $1000 USD"*`
-    };
+// Preguntas adicionales — solo si el usuario quiere que llenemos por él
+const EXTRA_QUESTIONS = [
+  { field: 'phone',     question: '¿Cuál es tu número de teléfono? (con código de país, ej: +1 305 123 4567)' },
+  { field: 'birthDate', question: '¿Cuál es tu fecha de nacimiento? (DD/MM/YYYY)' },
+  { field: 'passport',  question: '¿Cuál es tu número de pasaporte o documento de identidad?' }
+];
+
+// Detecta qué campo falta del perfil básico
+function getMissingBasicField(profile) {
+  if (!profile) return BASIC_QUESTIONS[0];
+  for (const q of BASIC_QUESTIONS) {
+    if (!profile[q.field]) return q;
   }
-
-  // FASE 2 — Tiene info del viaje pero falta perfil del viajero
-  if (!travelerProfile || !travelerProfile.email) {
-    const missingField = getMissingField(travelerProfile);
-    if (missingField) {
-      return {
-        phase: 'collecting_profile',
-        field: missingField.field,
-        reply: missingField.question
-      };
-    }
-  }
-
-  // FASE 3 — Tiene todo, listo para buscar y reservar
-  return { phase: 'ready' };
+  return null;
 }
 
-// Detecta qué campo del perfil falta
-function getMissingField(profile) {
-  if (!profile) return PROFILE_QUESTIONS[0];
-  for (const q of PROFILE_QUESTIONS) {
+// Detecta qué campo falta del perfil extra
+function getMissingExtraField(profile) {
+  if (!profile) return EXTRA_QUESTIONS[0];
+  for (const q of EXTRA_QUESTIONS) {
     if (!profile[q.field]) return q;
   }
   return null;
@@ -47,21 +41,24 @@ async function extractFieldValue(field, userMessage) {
     max_tokens: 100,
     messages: [{
       role: 'user',
-      content: `Extract the "${field}" from this message. Return ONLY the value, nothing else.
+      content: `Extract the "${field}" from this message. Return ONLY the value, nothing else. No quotes, no explanation.
 Message: "${userMessage}"
-Field: ${field}
-
-Examples:
-- firstName: "Juan Martin"
-- lastName: "Rojas"  
-- email: "juan@gmail.com"
-- phone: "+1 305 123 4567"
-- birthDate: "15/03/1995"
-- passport: "AB123456"`
+Field: ${field}`
     }]
   });
-
   return response.content[0].text.trim();
 }
 
-module.exports = { handleConversation, extractFieldValue, getMissingField };
+// Genera el mensaje de elección cuando se necesitan datos extra
+function buildChoiceMessage(traveler, bookingUrl) {
+  return `Para completar la reserva necesito algunos datos adicionales del pasajero (teléfono, fecha de nacimiento y pasaporte).\n\n¿Cómo preferís?\n\n*1️⃣ Me los das y yo lleno todo por vos*\n_(te dejo justo antes del pago)_\n\n*2️⃣ Prefiero hacerlo yo mismo*\n🔗 ${bookingUrl}\n📧 Email: ${traveler.email}\n🔑 Contraseña: ${traveler.travelPassword}\n\nRespondé *1* o *2* 👇`;
+}
+
+module.exports = {
+  BASIC_QUESTIONS,
+  EXTRA_QUESTIONS,
+  getMissingBasicField,
+  getMissingExtraField,
+  extractFieldValue,
+  buildChoiceMessage
+};
