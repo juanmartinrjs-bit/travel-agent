@@ -1,18 +1,19 @@
 require('dotenv').config();
 const express = require('express');
 const { extractTravelInfo, generateTravelResponse } = require('./agent/claude');
+const { handleConversation, extractFieldValue, getMissingField } = require('./agent/conversation');
 const { searchEverything } = require('./search/index');
+const { autofillBooking } = require('./booking/autofill');
+const { createTravelerProfile, PROFILE_QUESTIONS } = require('./utils/profile');
 const { getSession, updateSession } = require('./utils/session');
 
 const app = express();
 app.use(express.json());
 
-// Health check
 app.get('/', (req, res) => {
-  res.json({ status: '✈️ Travel Agent running', version: '2.0' });
+  res.json({ status: '✈️ Travel Agent running', version: '3.0' });
 });
 
-// Endpoint principal — el marketplace llama este
 app.post('/chat', async (req, res) => {
   const { userId, message } = req.body;
 
@@ -21,35 +22,112 @@ app.post('/chat', async (req, res) => {
   }
 
   try {
-    // 1. Extraer info del viaje del mensaje
-    const travelInfo = await extractTravelInfo(message);
+    const session = getSession(userId);
 
-    if (!travelInfo || !travelInfo.destination) {
+    // ── FASE 1: Recopilar info del viaje ──────────────────────────
+    if (!session.travelInfo || !session.travelInfo.destination) {
+      const travelInfo = await extractTravelInfo(message);
+
+      if (!travelInfo || !travelInfo.destination) {
+        return res.json({
+          phase: 'travel_info',
+          reply: `¡Hola! Soy tu agente de viajes personal ✈️\n\nDime a dónde querés viajar, las fechas y tu presupuesto.\n\nEjemplo: *"Quiero ir de Miami a Puerto Rico del 1 al 15 de junio, presupuesto $1000 USD"*`
+        });
+      }
+
+      updateSession(userId, { travelInfo });
+
+      // Empezar a pedir datos del perfil
       return res.json({
-        reply: `¡Hola! Soy tu agente de viajes 🧳\n\nDime a dónde querés viajar, las fechas y tu presupuesto.\n\nEjemplo: *"Quiero ir de Miami a Puerto Rico del 1 al 15 de junio, presupuesto $1000 USD para 2 personas"`
+        phase: 'collecting_profile',
+        reply: `¡Perfecto! Encontré tu destino: *${travelInfo.destination}* 🎯\n\nAntes de buscar, necesito algunos datos para reservar por vos.\n\n¿Cuál es tu nombre?`,
+        field: 'firstName'
       });
     }
 
-    updateSession(userId, { travelInfo });
+    // ── FASE 2: Recopilar perfil del viajero ─────────────────────
+    if (!session.profileComplete) {
+      const profile = session.travelerProfile || {};
+      const missing = getMissingField(profile);
 
-    // 2. Buscar en TODOS los sitios en paralelo
-    console.log('🔍 Launching parallel searches...');
-    const searchResults = await searchEverything(travelInfo);
+      if (missing) {
+        // Guardar el valor que acaba de responder
+        const value = await extractFieldValue(missing.field, message);
+        profile[missing.field] = value;
+        updateSession(userId, { travelerProfile: profile });
 
-    updateSession(userId, { searchResults });
+        // Ver si falta algo más
+        const nextMissing = getMissingField(profile);
+        if (nextMissing) {
+          return res.json({
+            phase: 'collecting_profile',
+            field: nextMissing.field,
+            reply: nextMissing.question
+          });
+        }
 
-    // 3. Claude analiza todo y arma las 3 mejores opciones
-    const reply = await generateTravelResponse(travelInfo, searchResults);
+        // Perfil completo — crear el objeto final
+        const traveler = createTravelerProfile(profile);
+        updateSession(userId, {
+          travelerProfile: traveler,
+          profileComplete: true
+        });
 
-    res.json({
-      reply,
-      travelInfo,
-      sources: {
-        flights: ['Google Flights', 'Kayak'],
-        stays: travelInfo.needs_hotel ? ['Google Hotels', 'Airbnb'] : [],
-        activities: ['TripAdvisor']
+        return res.json({
+          phase: 'searching',
+          reply: `¡Perfecto ${traveler.firstName}! 🙌\n\nTus datos están listos. Ahora voy a buscar las mejores opciones para tu viaje...\n\n🔍 Buscando en Google Flights, Kayak, Hotels y más...`,
+          traveler: {
+            name: traveler.fullName,
+            email: traveler.email,
+            travelPassword: traveler.travelPassword
+          }
+        });
       }
-    });
+    }
+
+    // ── FASE 3: Buscar vuelos y hoteles ──────────────────────────
+    if (!session.searchResults) {
+      const searchResults = await searchEverything(session.travelInfo);
+      updateSession(userId, { searchResults });
+
+      const reply = await generateTravelResponse(session.travelInfo, searchResults);
+      updateSession(userId, { searchReply: reply });
+
+      return res.json({
+        phase: 'options_presented',
+        reply: reply + `\n\n---\n💳 ¿Cuál opción preferís? Respondé con *1*, *2* o *3* y me encargo de dejar todo listo para el pago.`
+      });
+    }
+
+    // ── FASE 4: Usuario eligió opción → autofill ─────────────────
+    if (session.searchResults && session.profileComplete && !session.bookingDone) {
+      const choice = message.trim();
+      const flights = session.searchResults?.flights;
+
+      let bookingUrl = null;
+      if (choice === '1' || choice.toLowerCase().includes('budget') || choice.toLowerCase().includes('1')) {
+        bookingUrl = flights?.kayak?.bookingLink || flights?.googleFlights?.bookingLink;
+      } else if (choice === '2' || choice.toLowerCase().includes('value') || choice.toLowerCase().includes('2')) {
+        bookingUrl = flights?.googleFlights?.bookingLink || flights?.kayak?.bookingLink;
+      } else {
+        bookingUrl = flights?.googleFlights?.bookingLink || flights?.kayak?.bookingLink;
+      }
+
+      const traveler = session.travelerProfile;
+
+      return res.json({
+        phase: 'ready_to_pay',
+        reply: `✅ *Todo listo ${traveler.firstName}!*\n\n📧 *Correo de viajes:* ${traveler.email}\n🔑 *Contraseña:* ${traveler.travelPassword}\n\n🔗 *Link de reserva:*\n${bookingUrl}\n\n👆 Entrá al link, hacé sign in con ese correo y contraseña, y completá el pago. ¡Todo ya está llenado!\n\n_Guardá este correo y contraseña — los vamos a usar para todos tus viajes futuros_ 🧳`,
+        bookingUrl,
+        credentials: {
+          email: traveler.email,
+          password: traveler.travelPassword
+        }
+      });
+    }
+
+    // Fallback
+    res.json({ reply: '¿En qué más te puedo ayudar con tu viaje? ✈️' });
 
   } catch (error) {
     console.error('Error:', error);
@@ -59,6 +137,6 @@ app.post('/chat', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`✈️  Travel Agent v2.0 running on port ${PORT}`);
-  console.log(`📍 Endpoint: POST http://localhost:${PORT}/chat`);
+  console.log(`✈️  Travel Agent v3.0 running on port ${PORT}`);
+  console.log(`📍 POST http://localhost:${PORT}/chat`);
 });
