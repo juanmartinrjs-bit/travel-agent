@@ -71,6 +71,10 @@ async function chat(messages, searchResults = null, travelInfo = null) {
   let contextMessage = '';
   
   if (searchResults && travelInfo) {
+    const flights = searchResults.flights?.results || [];
+    const hotels = searchResults.stays?.results || [];
+    const links = searchResults.bookingLinks || {};
+
     contextMessage = `
 [SEARCH RESULTS AVAILABLE]
 Trip: ${travelInfo.origin || 'Origin TBD'} → ${travelInfo.destination}
@@ -78,21 +82,22 @@ Dates: ${travelInfo.departure_date} to ${travelInfo.return_date || 'one way'}
 Budget: $${travelInfo.budget_usd} USD
 Travelers: ${travelInfo.travelers || 1}
 
-FLIGHTS:
-Google Flights: ${JSON.stringify(searchResults.flights?.googleFlights?.flights?.slice(0,3) || [], null, 2)}
-Kayak: ${JSON.stringify(searchResults.flights?.kayak?.flights?.slice(0,3) || [], null, 2)}
-Flight booking links:
-- Kayak: ${searchResults.flights?.kayak?.bookingLink || 'N/A'}
-- Google Flights: ${searchResults.flights?.googleFlights?.bookingLink || 'N/A'}
+FLIGHTS FOUND (${flights.length} results):
+${JSON.stringify(flights.slice(0, 5), null, 2)}
 
-${travelInfo.needs_hotel ? `HOTELS:
-Google Hotels: ${JSON.stringify(searchResults.stays?.googleHotels?.hotels?.slice(0,3) || [], null, 2)}
-Airbnb: ${JSON.stringify(searchResults.stays?.airbnb?.listings?.slice(0,3) || [], null, 2)}
-Hotel booking links:
-- Booking.com: ${searchResults.stays?.googleHotels?.bookingLink || 'N/A'}
-- Airbnb: ${searchResults.stays?.airbnb?.bookingLink || 'N/A'}` : 'No hotel needed.'}
+BOOKING LINKS:
+- Google Flights: ${links.googleFlights || 'N/A'}
+- Kayak: ${links.kayak || 'N/A'}
+- Aviasales: ${links.aviasales || 'N/A'}
 
-ACTIVITIES & RESTAURANTS (TripAdvisor):
+${travelInfo.needs_hotel ? `HOTELS FOUND (${hotels.length} results):
+${JSON.stringify(hotels.slice(0, 5), null, 2)}
+
+HOTEL LINKS:
+- Booking.com: ${links.booking || 'N/A'}
+- Airbnb: ${links.airbnb || 'N/A'}` : 'No hotel needed.'}
+
+ACTIVITIES & RESTAURANTS:
 ${JSON.stringify(searchResults.activities?.places?.slice(0,3) || [], null, 2)}
 [END SEARCH RESULTS]
 `;

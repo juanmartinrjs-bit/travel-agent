@@ -28,20 +28,21 @@ app.post('/chat', async (req, res) => {
     let searchResults = session.searchResults || null;
     let travelInfo = session.travelInfo || null;
 
-    if (!searchResults) {
-      // Extraer info del viaje del historial
-      travelInfo = await extractTravelInfo(messages);
-      updateSession(userId, { travelInfo });
+    // Extraer info del viaje del historial
+    travelInfo = await extractTravelInfo(messages);
+    updateSession(userId, { travelInfo });
 
-      // Si tenemos todo, lanzar búsqueda
-      if (travelInfo?.ready_to_search && travelInfo?.destination) {
-        console.log(`🔍 Searching for: ${travelInfo.origin} → ${travelInfo.destination}`);
-        searchResults = await searchEverything(travelInfo);
-        updateSession(userId, { searchResults, travelInfo });
-      }
+    // Si tenemos todo y no hemos buscado aún, buscar PRIMERO antes de responder
+    if (!searchResults && travelInfo?.ready_to_search && travelInfo?.destination) {
+      console.log(`🔍 Searching for: ${travelInfo.origin} → ${travelInfo.destination}`);
+      // Informar al usuario que está buscando
+      // Buscar y esperar resultados completos
+      searchResults = await searchEverything(travelInfo);
+      updateSession(userId, { searchResults, travelInfo });
+      console.log(`✅ Search complete. Flights: ${searchResults?.flights?.kayak?.flights?.length || 0} results`);
     }
 
-    // Claude responde con toda la memoria conversacional
+    // Claude responde CON los resultados ya disponibles
     const claudeResponse = await chat(messages, searchResults, travelInfo);
 
     // Detectar acciones especiales en la respuesta

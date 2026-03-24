@@ -1,59 +1,98 @@
 const { searchGoogleFlights } = require('./scrapers/google-flights');
-const { searchKayak } = require('./scrapers/kayak');
+const { searchFlightsTravelpayouts, getIATA } = require('./scrapers/travelpayouts');
+const { searchBookingHotels } = require('./scrapers/booking-api');
 const { searchGoogleHotels } = require('./scrapers/google-hotels');
 const { searchAirbnb } = require('./scrapers/airbnb');
 const { searchTripAdvisor } = require('./scrapers/tripadvisor');
 
-// Búsqueda rápida — Kayak para vuelos, Google Hotels para estadías
-// Tiempo objetivo: < 40 segundos
 async function searchEverything({ origin, destination, departure_date, return_date, travelers, needs_hotel, budget_usd }) {
+  console.log(`🔍 Searching: ${origin} → ${destination} | ${departure_date}${return_date ? ' - ' + return_date : ''} | $${budget_usd}`);
 
-  console.log(`🔍 Searching for: ${origin} → ${destination} | ${departure_date}${return_date ? ' - ' + return_date : ''} | $${budget_usd}`);
+  // ── VUELOS ────────────────────────────────────────────────────
+  // Estrategia: Travelpayouts (API, instantáneo) + Google Flights (scraper, real)
+  const flightSearches = [];
 
-  // Vuelos: Google Flights (precios reales) + Kayak como respaldo
-  const flightSearch = Promise.all([
-    searchGoogleFlights({ origin, destination, departure_date, return_date, travelers }),
-    searchKayak({ origin, destination, departure_date, return_date, travelers }).catch(() => ({ flights: [], source: 'Kayak' }))
-  ]).then(([gf, kayak]) => ({
-    ...gf,
-    kayakFlights: kayak.flights || [],
-    kayakLink: kayak.bookingLink
-  }));
+  // 1. Travelpayouts API (si hay token)
+  if (process.env.TRAVELPAYOUTS_TOKEN) {
+    flightSearches.push(
+      searchFlightsTravelpayouts({ origin, destination, departure_date, return_date, travelers })
+        .catch(e => ({ source: 'Travelpayouts', flights: [], error: e.message }))
+    );
+  }
 
-  // Hotel: solo si necesita
-  const hotelSearch = (needs_hotel && departure_date && return_date)
-    ? searchGoogleHotels({ destination, checkin: departure_date, checkout: return_date, travelers })
-    : Promise.resolve(null);
-
-  // Correr en paralelo con timeout de 45s
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Search timeout')), 45000)
+  // 2. Google Flights scraper (siempre)
+  flightSearches.push(
+    searchGoogleFlights({ origin, destination, departure_date, return_date, travelers })
+      .catch(e => ({ source: 'Google Flights', flights: [], error: e.message }))
   );
 
-  const [flightResult, hotelResult] = await Promise.all([
-    Promise.race([flightSearch, timeout]).catch(e => ({ error: e.message, flights: [] })),
-    Promise.race([hotelSearch, timeout]).catch(e => ({ error: e.message, hotels: [] }))
+  // ── HOTELES ───────────────────────────────────────────────────
+  const hotelSearches = [];
+  if (needs_hotel && departure_date && return_date) {
+    // 1. Booking API (si hay key)
+    if (process.env.BOOKING_API_KEY) {
+      hotelSearches.push(
+        searchBookingHotels({ destination, checkin: departure_date, checkout: return_date, travelers })
+          .catch(e => ({ source: 'Booking.com', hotels: [], error: e.message }))
+      );
+    }
+    // 2. Google Hotels scraper (siempre)
+    hotelSearches.push(
+      searchGoogleHotels({ destination, checkin: departure_date, checkout: return_date, travelers })
+        .catch(e => ({ source: 'Google Hotels', hotels: [], error: e.message }))
+    );
+    // 3. Airbnb scraper
+    hotelSearches.push(
+      searchAirbnb({ destination, checkin: departure_date, checkout: return_date, travelers })
+        .catch(e => ({ source: 'Airbnb', listings: [], error: e.message }))
+    );
+  }
+
+  // ── ACTIVIDADES ───────────────────────────────────────────────
+  const activitiesSearch = searchTripAdvisor({ destination })
+    .catch(e => ({ source: 'TripAdvisor', places: [], error: e.message }));
+
+  // ── CORRER TODO EN PARALELO con timeout global ────────────────
+  const timeout = ms => new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms)
+  );
+
+  const [flightResults, hotelResults, activities] = await Promise.all([
+    Promise.race([Promise.all(flightSearches), timeout(50000)]).catch(() => []),
+    Promise.race([Promise.all(hotelSearches), timeout(50000)]).catch(() => []),
+    Promise.race([activitiesSearch, timeout(30000)]).catch(() => ({ places: [] }))
   ]);
 
-  // Links de respaldo para los demás sitios
-  const backupLinks = {
-    googleFlights: `https://www.google.com/travel/flights?q=flights+from+${encodeURIComponent(origin)}+to+${encodeURIComponent(destination)}+${departure_date}`,
-    kayak: `https://www.kayak.com/flights/${origin}-${destination}/${departure_date}${return_date ? '/' + return_date : ''}/${travelers}adults?sort=price_a`,
+  // Combinar todos los vuelos encontrados
+  const allFlights = (flightResults || []).flatMap(r => r.flights || []);
+  const allHotels = (hotelResults || []).flatMap(r => r.hotels || r.listings || []);
+
+  // Links de reserva para cada sitio
+  const originCode = getIATA(origin);
+  const destCode = getIATA(destination);
+  const bookingLinks = {
+    googleFlights: `https://www.google.com/travel/flights?hl=en&q=flights+from+${encodeURIComponent(origin)}+to+${encodeURIComponent(destination)}+${departure_date}${return_date ? '+return+' + return_date : '+one+way'}`,
+    kayak: `https://www.kayak.com/flights/${originCode}-${destCode}/${departure_date}${return_date ? '/' + return_date : ''}/${travelers}adults?sort=price_a`,
+    booking: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(destination)}&checkin=${departure_date}&checkout=${return_date || ''}`,
     airbnb: `https://www.airbnb.com/s/${encodeURIComponent(destination)}/homes?checkin=${departure_date}&checkout=${return_date || ''}`,
-    booking: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(destination)}&checkin=${departure_date}&checkout=${return_date || ''}`
+    aviasales: `https://www.aviasales.com/search/${originCode}${departure_date?.replace(/-/g,'').substring(2)}${destCode}1`
   };
+
+  console.log(`✅ Found: ${allFlights.length} flights, ${allHotels.length} hotels`);
 
   return {
     flights: {
-      kayak: flightResult || {},
-      googleFlights: { bookingLink: backupLinks.googleFlights, flights: [] }
+      results: allFlights,
+      sources: (flightResults || []).map(r => r.source),
+      bookingLinks
     },
     stays: needs_hotel ? {
-      googleHotels: hotelResult || {},
-      airbnb: { bookingLink: backupLinks.airbnb, listings: [] }
+      results: allHotels,
+      sources: (hotelResults || []).map(r => r.source),
+      bookingLinks
     } : null,
-    backupLinks,
-    activities: { places: [], bookingLink: `https://www.tripadvisor.com/Search?q=${encodeURIComponent(destination)}` }
+    activities,
+    bookingLinks
   };
 }
 
