@@ -10,8 +10,15 @@ async function searchEverything({ origin, destination, departure_date, return_da
 
   console.log(`🔍 Searching for: ${origin} → ${destination} | ${departure_date}${return_date ? ' - ' + return_date : ''} | $${budget_usd}`);
 
-  // Vuelos: solo Kayak (probado, rápido, precios reales)
-  const flightSearch = searchKayak({ origin, destination, departure_date, return_date, travelers });
+  // Vuelos: Google Flights (precios reales) + Kayak como respaldo
+  const flightSearch = Promise.all([
+    searchGoogleFlights({ origin, destination, departure_date, return_date, travelers }),
+    searchKayak({ origin, destination, departure_date, return_date, travelers }).catch(() => ({ flights: [], source: 'Kayak' }))
+  ]).then(([gf, kayak]) => ({
+    ...gf,
+    kayakFlights: kayak.flights || [],
+    kayakLink: kayak.bookingLink
+  }));
 
   // Hotel: solo si necesita
   const hotelSearch = (needs_hotel && departure_date && return_date)
