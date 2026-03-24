@@ -3,9 +3,11 @@ const express = require('express');
 const { chat, extractTravelInfo, detectActions, cleanResponse } = require('./agent/claude');
 const { searchEverything } = require('./search/index');
 const { getSession, updateSession } = require('./utils/session');
+const { transcribeAudio } = require('./utils/audio');
 
 const app = express();
 app.use(express.json());
+app.use(express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '25mb' }));
 
 app.get('/', (req, res) => {
   res.json({ status: '✈️ Travel Agent running', version: '5.0' });
@@ -62,6 +64,62 @@ app.post('/chat', async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Audio endpoint — receives audio buffer, transcribes, then sends to /chat
+app.post('/audio', async (req, res) => {
+  const userId = req.headers['x-user-id'] || req.query.userId;
+  const mimeType = req.headers['content-type'] || 'audio/ogg';
+
+  if (!userId) return res.status(400).json({ error: 'x-user-id header required' });
+  if (!req.body || req.body.length === 0) return res.status(400).json({ error: 'Audio buffer required' });
+
+  try {
+    console.log(`🎙️ Transcribing audio for user ${userId} (${req.body.length} bytes)`);
+    const transcript = await transcribeAudio(req.body, mimeType);
+    console.log(`📝 Transcript: "${transcript}"`);
+
+    // Now process the transcript as a normal chat message
+    // Reuse the same chat logic by making an internal request
+    const chatReq = { body: { userId, message: transcript } };
+    const chatRes = {
+      _data: null,
+      json(data) { this._data = data; },
+      status(code) { return this; }
+    };
+
+    // Inline the chat handler
+    const session = getSession(userId);
+    const messages = session.messages || [];
+    messages.push({ role: 'user', content: transcript });
+
+    let searchResults = session.searchResults || null;
+    let travelInfo = session.travelInfo || null;
+
+    if (!searchResults) {
+      travelInfo = await extractTravelInfo(messages);
+      updateSession(userId, { travelInfo });
+      if (travelInfo?.ready_to_search && travelInfo?.destination) {
+        searchResults = await searchEverything(travelInfo);
+        updateSession(userId, { searchResults, travelInfo });
+      }
+    }
+
+    const claudeResponse = await chat(messages, searchResults, travelInfo);
+    const cleanedReply = cleanResponse(claudeResponse);
+    messages.push({ role: 'assistant', content: cleanedReply });
+    updateSession(userId, { messages });
+
+    res.json({
+      transcript,          // What the user said (so frontend can show it)
+      reply: cleanedReply, // Agent's response
+      phase: searchResults ? 'in_conversation' : 'collecting_info'
+    });
+
+  } catch (error) {
+    console.error('Audio error:', error);
+    res.status(500).json({ error: 'Audio processing failed', details: error.message });
   }
 });
 
