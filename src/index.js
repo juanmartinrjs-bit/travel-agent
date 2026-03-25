@@ -4,6 +4,7 @@ const { chat, extractTravelInfo, detectActions, cleanResponse } = require('./age
 const { searchEverything } = require('./search/index');
 const { getSession, updateSession } = require('./utils/session');
 const { transcribeAudio } = require('./utils/audio');
+const { kayakAutofill } = require('./booking/kayak-autofill');
 
 const path = require('path');
 const app = express();
@@ -67,6 +68,36 @@ app.post('/chat', async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+// Booking autofill endpoint — fills all forms and stops before payment
+app.post('/book', async (req, res) => {
+  const { userId, flightUrl } = req.body;
+  if (!userId || !flightUrl) return res.status(400).json({ error: 'userId and flightUrl required' });
+
+  const session = getSession(userId);
+  const traveler = session.travelerProfile;
+
+  if (!traveler?.email) {
+    return res.status(400).json({ error: 'No traveler profile found. Start a chat first.' });
+  }
+
+  res.json({ status: 'processing', message: '🤖 Llenando el formulario... (puede tomar 1-2 minutos)' });
+
+  // Run autofill in background and notify via session
+  kayakAutofill({ flightUrl, traveler }).then(result => {
+    updateSession(userId, { lastBooking: result });
+  });
+});
+
+// Get booking result
+app.get('/book/result/:userId', (req, res) => {
+  const session = getSession(req.params.userId);
+  if (session.lastBooking) {
+    res.json(session.lastBooking);
+  } else {
+    res.json({ status: 'pending' });
   }
 });
 

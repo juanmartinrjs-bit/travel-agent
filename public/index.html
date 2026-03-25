@@ -87,8 +87,8 @@
     const formatted = text
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, '<a href="$1" target="_blank" style="color:#1a73e8">$1</a>')
-      .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color:#1a73e8">$1</a>');
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:#1a73e8;text-decoration:underline">$1</a>')
+      .replace(/(?<!\()(https?:\/\/[^\s<>"]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:#1a73e8;text-decoration:underline">$1</a>');
     
     div.innerHTML = `
       <div class="bubble">${formatted}</div>
