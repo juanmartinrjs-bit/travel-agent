@@ -5,6 +5,7 @@ const { searchEverything } = require('./search/index');
 const { getSession, updateSession } = require('./utils/session');
 const { transcribeAudio } = require('./utils/audio');
 const { kayakAutofill } = require('./booking/kayak-autofill');
+const { airlineAutofill } = require('./booking/airline-autofill');
 
 const path = require('path');
 const app = express();
@@ -57,6 +58,41 @@ app.post('/chat', async (req, res) => {
     // Agregar respuesta de Claude al historial
     messages.push({ role: 'assistant', content: cleanedReply });
     updateSession(userId, { messages });
+
+    // Si autofill listo — ejecutar en background
+    if (actions.autofillReady && travelInfo && session.travelerProfile) {
+      const traveler = session.travelerProfile;
+      console.log(`🤖 Triggering autofill for ${traveler.firstName}...`);
+
+      airlineAutofill({
+        origin: travelInfo.origin,
+        destination: travelInfo.destination,
+        departure_date: travelInfo.departure_date,
+        return_date: travelInfo.return_date,
+        travelers: travelInfo.travelers || 1,
+        traveler
+      }).then(result => {
+        updateSession(userId, { autofillResult: result });
+        console.log('✅ Autofill done:', result.paymentUrl?.substring(0, 60));
+      }).catch(e => console.error('Autofill error:', e.message));
+
+      return res.json({
+        reply: cleanedReply + `\n\n🤖 *Llenando el formulario ahora... (1-2 min). En cuanto esté listo te mando el link de pago.*`,
+        phase: 'autofilling'
+      });
+    }
+
+    // Si autofill ya terminó y no se entregó aún
+    if (session.autofillResult?.success && !session.autofillDelivered) {
+      updateSession(userId, { autofillDelivered: true });
+      const r = session.autofillResult;
+      return res.json({
+        reply: `✅ *¡Todo listo! Solo falta que revises y pagues:*\n\n🔗 ${r.paymentUrl}\n📧 Email: ${r.credentials.email}\n🔑 Contraseña: ${r.credentials.password}`,
+        phase: 'ready_to_pay',
+        paymentUrl: r.paymentUrl,
+        credentials: r.credentials
+      });
+    }
 
     res.json({
       reply: cleanedReply,

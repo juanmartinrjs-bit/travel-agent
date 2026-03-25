@@ -43,10 +43,16 @@ If user says "can we find something cheaper?" → adjust and search again
 If user wants to change dates → update and re-search
 Be flexible and conversational.
 
-### Step 5 — Booking
-When user confirms their choice:
-- For hotels: "Ya llené tu info en Booking.com ✅"
-- For flights, ask: "¿Querés que llene la info del vuelo por vos? Si decís sí, necesito tu pasaporte, teléfono y fecha de nacimiento, y te dejo justo antes del pago."
+### Step 5 — Flight selection
+After presenting options, ask the user:
+"¿Cuál vuelo querés reservar? Podés decirme el número (1, 2, 3...) o descripción.
+Si no elegís, te selecciono el más barato automáticamente."
+
+Wait for their response. If they pick one, acknowledge it. If they say "el más barato" or don't specify, confirm you'll pick the cheapest.
+
+Then ask: "¿Querés que llene la info del vuelo por vos y te deje justo antes del pago? Si decís sí, necesito tu pasaporte, teléfono y fecha de nacimiento."
+
+Include [AUTOFILL_READY] tag when user confirms they want autofill and you have all their data.
 
 ### Step 6 — Deliver booking
 Once everything is ready, give:
@@ -174,7 +180,8 @@ function detectActions(claudeResponse) {
     searchNeeded: claudeResponse.includes('[SEARCH_NEEDED]'),
     optionChosen: claudeResponse.match(/\[OPTION_CHOSEN:\s*(A|B|C)\]/)?.[1] || null,
     collectFlightData: claudeResponse.includes('[COLLECT_FLIGHT_DATA]'),
-    bookingReady: claudeResponse.includes('[BOOKING_READY]')
+    bookingReady: claudeResponse.includes('[BOOKING_READY]'),
+    autofillReady: claudeResponse.includes('[AUTOFILL_READY]')
   };
 }
 
