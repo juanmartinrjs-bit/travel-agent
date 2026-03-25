@@ -69,7 +69,12 @@
 </div>
 
 <script>
-  const userId = 'user_' + Math.random().toString(36).substring(2, 10);
+  // Keep same userId across page reloads
+  let userId = localStorage.getItem('travel_agent_user_id');
+  if (!userId) {
+    userId = 'user_' + Math.random().toString(36).substring(2, 10);
+    localStorage.setItem('travel_agent_user_id', userId);
+  }
   let isLoading = false;
 
   function formatTime() {
@@ -134,6 +139,7 @@
     isLoading = false;
     document.getElementById('sendBtn').disabled = false;
     input.focus();
+    saveMessages();
   }
 
   function handleKey(e) {
@@ -151,12 +157,31 @@
   function newChat() {
     if (!confirm('¿Empezar una nueva búsqueda?')) return;
     fetch('/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId }) });
+    localStorage.removeItem('travel_chat_' + userId);
     document.getElementById('messages').querySelectorAll('.message').forEach(m => m.remove());
     addMessage('¡Hola! Soy tu agente de viajes personal ✈️\n\nDime a dónde querés viajar, las fechas y tu presupuesto.', 'bot');
   }
 
-  // Welcome message
+  // Save messages to localStorage
+  function saveMessages() {
+    const msgs = [];
+    document.querySelectorAll('.message').forEach(m => {
+      msgs.push({ type: m.classList.contains('user') ? 'user' : 'bot', text: m.querySelector('.bubble').innerText, time: m.querySelector('.time')?.innerText });
+    });
+    localStorage.setItem('travel_chat_' + userId, JSON.stringify(msgs));
+  }
+
+  // Load saved messages on startup
   window.onload = () => {
+    const saved = localStorage.getItem('travel_chat_' + userId);
+    if (saved) {
+      const msgs = JSON.parse(saved);
+      if (msgs.length > 0) {
+        msgs.forEach(m => addMessage(m.text, m.type));
+        document.getElementById('input').focus();
+        return;
+      }
+    }
     addMessage('¡Hola! Soy tu agente de viajes personal ✈️\n\nDime a dónde querés viajar, las fechas y tu presupuesto.\n\nEjemplo: *"Quiero ir de Miami a Puerto Rico del 1 al 15 de junio, presupuesto $1000 USD"*', 'bot');
     document.getElementById('input').focus();
   };
