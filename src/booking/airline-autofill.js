@@ -57,32 +57,49 @@ const AIRLINE_URLS = {
     `https://www.google.com/travel/flights?q=flights+from+${origin}+to+${destination}+${departure_date}${return_date ? '+return+' + return_date : '+one+way'}`
 };
 
-// Detect which airline to use based on route
-function detectAirline(origin, destination) {
+// Map airline name from search results to our key
+const AIRLINE_NAME_MAP = {
+  'westjet': 'WestJet', 'west jet': 'WestJet',
+  'air canada': 'AirCanada', 'aircanada': 'AirCanada',
+  'flair': 'Flair', 'flair airlines': 'Flair',
+  'american': 'AmericanAirlines', 'american airlines': 'AmericanAirlines',
+  'united': 'United', 'united airlines': 'United',
+  'delta': 'Delta', 'delta airlines': 'Delta',
+  'spirit': 'Spirit', 'spirit airlines': 'Spirit',
+  'frontier': 'Frontier', 'frontier airlines': 'Frontier',
+  'avianca': 'Avianca',
+  'latam': 'LATAM', 'latam airlines': 'LATAM',
+  'copa': 'Copa', 'copa airlines': 'Copa',
+  'aeromexico': 'Aeromexico', 'aeroméxico': 'Aeromexico',
+  'iberia': 'Iberia',
+  'emirates': 'Emirates'
+};
+
+// Detect which airline to use — first try to match from flight result name
+function detectAirline(origin, destination, airlineName = null) {
+  // If we have the airline name from search results, use it
+  if (airlineName) {
+    const key = Object.keys(AIRLINE_NAME_MAP).find(k => airlineName.toLowerCase().includes(k));
+    if (key) return AIRLINE_NAME_MAP[key];
+  }
+
+  // Fallback: detect from route
   const canadianOrigins = ['YEG', 'YYC', 'YVR', 'YYZ', 'YUL', 'YOW', 'YHZ'];
   const latinDests = ['BOG', 'MDE', 'CLO', 'CTG', 'GYE', 'UIO', 'LIM', 'SCL', 'EZE', 'GRU', 'PTY'];
   const usOrigins = ['MIA', 'JFK', 'LAX', 'ORD', 'DFW', 'ATL', 'IAH', 'MCO'];
 
-  // Canada → Latin America → Avianca (best connectivity)
   if (canadianOrigins.includes(origin) && latinDests.includes(destination)) return 'Avianca';
-  // Canada → Canada/US → WestJet
   if (canadianOrigins.includes(origin)) return 'WestJet';
-  // US → Latin → Copa or LATAM
   if (usOrigins.includes(origin) && latinDests.includes(destination)) return 'Copa';
-  // Puerto Rico routes → American
   if (destination === 'SJU' || origin === 'SJU') return 'AmericanAirlines';
-  // Dubai routes → Emirates
   if (destination === 'DXB' || origin === 'DXB') return 'Emirates';
-  // Spain routes → Iberia
   if (destination === 'MAD' || origin === 'MAD') return 'Iberia';
-  // Mexico → Aeromexico
   if (destination === 'MEX' || origin === 'MEX') return 'Aeromexico';
-  // Default
   return 'Default';
 }
 
 // Main autofill function
-async function airlineAutofill({ origin, destination, departure_date, return_date, travelers = 1, traveler, preferredAirline = null }) {
+async function airlineAutofill({ origin, destination, departure_date, return_date, travelers = 1, traveler, preferredAirline = null, airlineFromSearch = null }) {
   let browser;
   try {
     browser = await chromium.launch({
@@ -94,14 +111,17 @@ async function airlineAutofill({ origin, destination, departure_date, return_dat
     await injectStealth(context);
     const page = await context.newPage();
 
-    // Pick airline
-    const airlineName = preferredAirline || detectAirline(origin, destination);
+    // Pick airline — use from search results first, then preferred, then auto-detect
+    const airlineName = preferredAirline || detectAirline(origin, destination, airlineFromSearch);
     const urlBuilder = AIRLINE_URLS[airlineName] || AIRLINE_URLS.Default;
     const airlineUrl = urlBuilder({ origin, destination, departure_date, return_date, travelers });
 
     console.log(`✈️ Opening ${airlineName}: ${airlineUrl.substring(0, 70)}...`);
     await page.goto(airlineUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
     await simulateHuman(page);
+
+    // Dismiss any login/sign-in popups — prefer guest checkout
+    await dismissLoginPopup(page);
 
     // Try to select cheapest flight
     await selectCheapestFlight(page);
@@ -127,6 +147,34 @@ async function airlineAutofill({ origin, destination, departure_date, return_dat
     return { success: false, error: error.message };
   } finally {
     if (browser) await browser.close();
+  }
+}
+
+// Dismiss login popups and prefer guest checkout
+async function dismissLoginPopup(page) {
+  const guestSelectors = [
+    'button:has-text("Continue as guest")',
+    'button:has-text("Guest checkout")',
+    'button:has-text("Skip")',
+    'button:has-text("No thanks")',
+    'button:has-text("Continue without signing in")',
+    'a:has-text("Continue as guest")',
+    '[aria-label="Close"]',
+    'button:has-text("Close")',
+    '.close-btn',
+    '[class*="close"]'
+  ];
+
+  for (const sel of guestSelectors) {
+    try {
+      const btn = page.locator(sel).first();
+      if (await btn.isVisible({ timeout: 2000 })) {
+        await btn.click();
+        await randomDelay(1000, 2000);
+        console.log('✅ Dismissed login popup');
+        return;
+      }
+    } catch (e) { /* try next */ }
   }
 }
 
