@@ -19,22 +19,56 @@ async function kayakAutofill({ flightUrl, traveler }) {
     const page = await context.newPage();
 
     console.log('🤖 Opening Kayak...');
-    await page.goto(flightUrl, { waitUntil: 'domcontentloaded', timeout: 40000 });
+    await page.goto(flightUrl, { waitUntil: 'networkidle', timeout: 45000 });
     await simulateHuman(page);
 
-    // Step 1: Click on the cheapest flight
-    const flightBtn = page.locator('[class*="booking-link"], [class*="bookingLink"], button:has-text("View Deal"), a:has-text("Select")').first();
-    if (await flightBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await humanMove(page, 400, 300);
-      await flightBtn.click();
-      await randomDelay(2000, 4000);
+    // Step 1: Wait for results and click cheapest flight
+    console.log('🔍 Looking for cheapest flight to click...');
+    await page.waitForTimeout(3000);
+
+    // Try to click the first "View Deal" or "Select" button
+    const dealSelectors = [
+      'a[class*="booking-link"]',
+      'button[class*="booking"]',
+      'a:has-text("View Deal")',
+      'button:has-text("Select")',
+      'a:has-text("Choose")',
+      '[data-testid*="book"]'
+    ];
+
+    let clicked = false;
+    for (const sel of dealSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 3000 })) {
+          await btn.scrollIntoViewIfNeeded();
+          await randomDelay(500, 1000);
+          await btn.click();
+          clicked = true;
+          console.log('✅ Clicked deal button:', sel);
+          await randomDelay(3000, 5000);
+          break;
+        }
+      } catch (e) { /* try next */ }
+    }
+
+    if (!clicked) {
+      // Try clicking the first result card directly
+      const firstResult = page.locator('.nrc6-wrapper, [class*="result"]').first();
+      if (await firstResult.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await firstResult.click();
+        await randomDelay(2000, 4000);
+        console.log('✅ Clicked first result');
+      }
     }
 
     // Step 2: Handle new tab if opened
+    await randomDelay(2000, 3000);
     const pages = context.pages();
     const activePage = pages[pages.length - 1];
-    await activePage.waitForLoadState('domcontentloaded');
+    await activePage.waitForLoadState('domcontentloaded').catch(() => {});
     await simulateHuman(activePage);
+    console.log('📍 Active page:', activePage.url().substring(0, 80));
 
     const currentUrl = activePage.url();
     console.log('📍 Current page:', currentUrl.substring(0, 60));
