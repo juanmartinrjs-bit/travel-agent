@@ -5,9 +5,11 @@ const { searchEverything } = require('./search/index');
 const { getSession, updateSession } = require('./utils/session');
 const { transcribeAudio } = require('./utils/audio');
 
+const path = require('path');
 const app = express();
 app.use(express.json());
 app.use(express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '25mb' }));
+app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/', (req, res) => {
   res.json({ status: '✈️ Travel Agent running', version: '5.0' });
