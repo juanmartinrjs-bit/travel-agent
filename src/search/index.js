@@ -1,4 +1,5 @@
 const { searchGoogleFlights } = require('./scrapers/google-flights');
+const { searchKayak } = require('./scrapers/kayak');
 const { searchFlightsTravelpayouts, getIATA } = require('./scrapers/travelpayouts');
 const { searchBookingHotels } = require('./scrapers/booking-api');
 const { searchGoogleHotels } = require('./scrapers/google-hotels');
@@ -20,11 +21,19 @@ async function searchEverything({ origin, destination, departure_date, return_da
     );
   }
 
-  // 2. Google Flights scraper (siempre)
+  // 2. Google Flights (siempre)
   flightSearches.push(
     searchGoogleFlights({ origin, destination, departure_date, return_date, travelers })
       .catch(e => ({ source: 'Google Flights', flights: [], error: e.message }))
   );
+
+  // 3. Kayak (siempre)
+  flightSearches.push(
+    searchKayak({ origin, destination, departure_date, return_date, travelers })
+      .catch(e => ({ source: 'Kayak', flights: [], error: e.message }))
+  );
+
+
 
   // ── HOTELES ───────────────────────────────────────────────────
   const hotelSearches = [];
@@ -73,6 +82,8 @@ async function searchEverything({ origin, destination, departure_date, return_da
   const bookingLinks = {
     googleFlights: `https://www.google.com/travel/flights?hl=en&q=flights+from+${encodeURIComponent(origin)}+to+${encodeURIComponent(destination)}+${departure_date}${return_date ? '+return+' + return_date : '+one+way'}`,
     kayak: `https://www.kayak.com/flights/${originCode}-${destCode}/${departure_date}${return_date ? '/' + return_date : ''}/${travelers}adults?sort=price_a`,
+    skyscanner: `https://www.skyscanner.com/transport/flights/${originCode.toLowerCase()}/${destCode.toLowerCase()}/${departure_date?.replace(/-/g,'').substring(2)}/?adults=${travelers}&sortby=price`,
+    expedia: `https://www.expedia.com/Flights-Search?trip=${return_date ? 'roundtrip' : 'oneway'}&leg1=from%3A${originCode}%2Cto%3A${destCode}%2Cdeparture%3A${departure_date}TANYT&passengers=adults%3A${travelers}&mode=search&options=sortby%3Aprice`,
     booking: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(destination)}&checkin=${departure_date}&checkout=${return_date || ''}`,
     airbnb: `https://www.airbnb.com/s/${encodeURIComponent(destination)}/homes?checkin=${departure_date}&checkout=${return_date || ''}`,
     aviasales: `https://www.aviasales.com/search/${originCode}${departure_date?.replace(/-/g,'').substring(2)}${destCode}1`
