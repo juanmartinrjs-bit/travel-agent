@@ -27,24 +27,34 @@ async function searchGoogleHotels({ destination, checkin, checkout, travelers = 
       const results = [];
       const seen = new Set();
 
-      // Look for price patterns near hotel names
-      const allText = document.querySelectorAll('h2, h3, [class*="hotel"], [class*="property"]');
-      allText.forEach((el, i) => {
-        if (i >= 10 || results.length >= 5) return;
-        const name = el.textContent?.trim();
-        if (!name || name.length > 80 || seen.has(name)) return;
+      // Google Hotels renders hotel name in h2/h3, price nearby in text
+      const headings = document.querySelectorAll('h2, h3');
 
-        // Look for price nearby
-        const parent = el.closest('li, [role="listitem"], [class*="card"], div[data-hveid]');
+      headings.forEach(h => {
+        if (results.length >= 6) return;
+        const name = h.textContent?.trim();
+        if (!name || name.length > 100 || name.length < 3) return;
+        if (seen.has(name)) return;
+        if (name.toLowerCase().includes('sponsored') || name.toLowerCase().includes('filter')) return;
+
+        // Look for price in surrounding text
+        const parent = h.closest('li, [role="listitem"], div[data-hveid]') || h.parentElement?.parentElement;
         if (!parent) return;
 
-        const priceEl = parent.querySelector('[class*="price"], [class*="Price"], [class*="rate"]');
-        const price = priceEl?.textContent?.trim();
-        const rating = parent.querySelector('[class*="rating"], [class*="score"]')?.textContent?.trim();
+        const parentText = parent.innerText || '';
+        const priceMatch = parentText.match(/\$[\d,]+/);
+        const ratingMatch = parentText.match(/(\d+\.\d+)\/5|(\d+\.\d+)\s*\(/);
+        const starsMatch = parentText.match(/(\d+)-star/);
 
-        if (name && price) {
+        if (priceMatch || results.length < 3) {
           seen.add(name);
-          results.push({ name, price, rating: rating || 'N/A', source: 'Google Hotels' });
+          results.push({
+            name,
+            price: priceMatch ? priceMatch[0] + ' per night' : 'Check on site',
+            rating: ratingMatch ? ratingMatch[1] || ratingMatch[2] : 'N/A',
+            stars: starsMatch ? starsMatch[1] + ' stars' : '',
+            source: 'Google Hotels'
+          });
         }
       });
 
@@ -52,6 +62,7 @@ async function searchGoogleHotels({ destination, checkin, checkout, travelers = 
     });
 
     return { source: 'Google Hotels', hotels, bookingLink };
+
   } catch (error) {
     return { source: 'Google Hotels', error: error.message, hotels: [] };
   } finally {
