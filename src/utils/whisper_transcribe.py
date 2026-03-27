@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 # Local Whisper transcription — 100% free, no API key needed
 import sys
+import os
 import whisper
 import json
 
+# Point to ffmpeg-static binary bundled with npm
+FFMPEG_PATH = os.path.abspath(os.path.join(
+    os.path.dirname(__file__),
+    '../../node_modules/ffmpeg-static/ffmpeg'
+))
+if os.path.exists(FFMPEG_PATH):
+    ffmpeg_dir = os.path.dirname(FFMPEG_PATH)
+    os.environ['PATH'] = ffmpeg_dir + ':' + os.environ.get('PATH', '')
+
 def transcribe(audio_path, language='es'):
-    model = whisper.load_model("base")  # small model, fast
+    model = whisper.load_model("base")
     result = model.transcribe(audio_path, language=language)
     return result["text"].strip()
 
