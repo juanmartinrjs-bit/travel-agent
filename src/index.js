@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { chat, extractTravelInfo, detectActions, cleanResponse } = require('./agent/claude');
 const { searchEverything } = require('./search/index');
-const { getSession, updateSession } = require('./utils/session');
+const { getSession, updateSession } = require('./utils/database');
 const { transcribeAudio } = require('./utils/audio');
 const { kayakAutofill } = require('./booking/kayak-autofill');
 const { airlineAutofill } = require('./booking/airline-autofill');
@@ -197,7 +197,7 @@ app.post('/audio', async (req, res) => {
 app.post('/reset', (req, res) => {
   const { userId } = req.body;
   if (userId) {
-    const { clearSession } = require('./utils/session');
+    const { clearSession } = require('./utils/database');
     clearSession(userId);
   }
   res.json({ ok: true });
