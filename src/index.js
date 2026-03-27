@@ -39,11 +39,43 @@ app.post('/chat', async (req, res) => {
     // Si tenemos todo y no hemos buscado aún, buscar PRIMERO antes de responder
     if (!searchResults && travelInfo?.ready_to_search && travelInfo?.destination) {
       console.log(`🔍 Searching for: ${travelInfo.origin} → ${travelInfo.destination}`);
-      // Informar al usuario que está buscando
-      // Buscar y esperar resultados completos
-      searchResults = await searchEverything(travelInfo);
-      updateSession(userId, { searchResults, travelInfo });
-      console.log(`✅ Search complete. Flights: ${searchResults?.flights?.kayak?.flights?.length || 0} results`);
+
+      // Send immediate "searching" response using SSE-style via header
+      // We use a two-phase approach: first send searching message, then results
+      const searchingMsg = `🔍 *Buscando en Google Flights, Kayak, Airbnb y más...*\n\nEsto puede tomar entre 30 y 60 segundos. ¡Ya casi! ✈️`;
+
+      // Store the searching message in history temporarily
+      messages.push({ role: 'assistant', content: searchingMsg });
+      updateSession(userId, { messages, searching: true });
+
+      // Return the searching message immediately
+      res.json({ reply: searchingMsg, phase: 'searching', searching: true });
+
+      // Continue searching in background
+      searchEverything(travelInfo).then(async results => {
+        // Remove the temporary searching message
+        const updatedSession = getSession(userId);
+        const msgs = updatedSession.messages.filter(m => m.content !== searchingMsg);
+
+        // Generate real response with results
+        const claudeResp = await chat(msgs, results, travelInfo);
+        const cleaned = cleanResponse(claudeResp);
+        msgs.push({ role: 'assistant', content: cleaned });
+
+        updateSession(userId, {
+          messages: msgs,
+          searchResults: results,
+          travelInfo,
+          searching: false,
+          pendingReply: cleaned
+        });
+        console.log(`✅ Search complete for ${userId}`);
+      }).catch(e => {
+        console.error('Search error:', e.message);
+        updateSession(userId, { searching: false, pendingReply: 'Hubo un error buscando vuelos. Intentá de nuevo.' });
+      });
+
+      return; // Already sent response
     }
 
     // Claude responde CON los resultados ya disponibles
@@ -105,6 +137,20 @@ app.post('/chat', async (req, res) => {
     console.error('Error:', error);
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
+});
+
+// Poll endpoint — frontend checks if search is done
+app.get('/poll/:userId', (req, res) => {
+  const session = getSession(req.params.userId);
+  if (session.searching) {
+    return res.json({ ready: false, message: '🔍 Todavía buscando...' });
+  }
+  if (session.pendingReply) {
+    const reply = session.pendingReply;
+    updateSession(req.params.userId, { pendingReply: null });
+    return res.json({ ready: true, reply });
+  }
+  res.json({ ready: false });
 });
 
 // Booking autofill endpoint — fills all forms and stops before payment

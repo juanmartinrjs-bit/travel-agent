@@ -139,6 +139,11 @@
       const data = await res.json();
       showTyping(false);
       addMessage(data.reply || 'Error al procesar tu mensaje', 'bot');
+
+      // If searching, start polling for results
+      if (data.searching) {
+        pollForResults();
+      }
     } catch (e) {
       showTyping(false);
       addMessage('Error de conexión. Intenta de nuevo.', 'bot');
@@ -178,6 +183,39 @@
     });
     localStorage.setItem('travel_chat_' + userId, JSON.stringify(msgs));
   }
+
+  // ── POLLING for search results ───────────────────────────────────
+  async function pollForResults() {
+    showTyping(true);
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/poll/${userId}`);
+        const data = await res.json();
+        if (data.ready && data.reply) {
+          clearInterval(interval);
+          showTyping(false);
+          addMessage(data.reply, 'bot');
+          isLoading = false;
+          document.getElementById('sendBtn').disabled = false;
+          saveMessages();
+        }
+      } catch (e) {
+        clearInterval(interval);
+        showTyping(false);
+        isLoading = false;
+        document.getElementById('sendBtn').disabled = false;
+      }
+    }, 3000); // poll every 3 seconds
+
+    // Timeout after 3 minutes
+    setTimeout(() => {
+      clearInterval(interval);
+      showTyping(false);
+      isLoading = false;
+      document.getElementById('sendBtn').disabled = false;
+    }, 180000);
+  }
+  // ── END POLLING ───────────────────────────────────────────────────
 
   // ── AUDIO RECORDING ─────────────────────────────────────────────
   let mediaRecorder = null;
