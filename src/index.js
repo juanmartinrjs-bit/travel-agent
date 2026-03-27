@@ -6,6 +6,9 @@ const { getSession, updateSession } = require('./utils/database');
 const { transcribeAudio } = require('./utils/audio');
 const { kayakAutofill } = require('./booking/kayak-autofill');
 const { airlineAutofill } = require('./booking/airline-autofill');
+const { getAuthUrl, getTokens, fetchPaymentEmails } = require('./utils/gmail');
+const { extractTransaction, generateSummary } = require('./agent/accounting-claude');
+const { generateExcel } = require('./utils/excel-generator');
 
 const path = require('path');
 const app = express();
@@ -182,6 +185,84 @@ app.get('/book/result/:userId', (req, res) => {
     res.json({ status: 'pending' });
   }
 });
+
+// ── ACCOUNTING AGENT ROUTES ───────────────────────────────────────
+const accountingTokens = {};
+const accountingResults = {};
+
+app.get('/auth/gmail', (req, res) => {
+  const url = getAuthUrl();
+  res.redirect(url);
+});
+
+app.get('/auth/callback', async (req, res) => {
+  const { code } = req.query;
+  const userId = req.query.state || 'default';
+  try {
+    const tokens = await getTokens(code);
+    accountingTokens[userId] = tokens;
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px">
+      <h2>✅ Gmail conectado!</h2>
+      <p>Ya podés generar tu reporte P&L.</p>
+      <script>window.close();</script>
+    </body></html>`);
+  } catch (e) {
+    res.status(500).send('Error: ' + e.message);
+  }
+});
+
+app.get('/auth/url', (req, res) => {
+  res.json({ url: getAuthUrl() });
+});
+
+app.post('/accounting/generate', async (req, res) => {
+  const { userId } = req.body;
+  const tokens = accountingTokens[userId];
+  if (!tokens) return res.status(401).json({ error: 'Gmail not connected. Call /auth/gmail first.' });
+
+  res.json({ status: 'processing', message: '📧 Leyendo emails y generando reporte... (1-2 min)' });
+
+  // Process in background
+  (async () => {
+    try {
+      const emails = await fetchPaymentEmails(tokens, 100);
+      const transactions = [];
+      for (const email of emails) {
+        const tx = await extractTransaction(email);
+        if (tx && tx.confidence !== 'low') transactions.push(tx);
+      }
+      if (transactions.length === 0) {
+        accountingResults[userId] = { error: 'No se encontraron transacciones.' };
+        return;
+      }
+      const summary = await generateSummary(transactions);
+      const { filepath, filename } = generateExcel(transactions, summary, userId);
+      accountingResults[userId] = {
+        transactions: transactions.length, summary, filename,
+        downloadUrl: `/accounting/download/${filename}`,
+        totals: {
+          income: transactions.filter(t => t.type === 'income').reduce((s, t) => s + Math.abs(t.amount), 0),
+          expenses: transactions.filter(t => t.type === 'expense').reduce((s, t) => s + Math.abs(t.amount), 0)
+        }
+      };
+    } catch (e) {
+      accountingResults[userId] = { error: e.message };
+    }
+  })();
+});
+
+app.get('/accounting/result/:userId', (req, res) => {
+  const result = accountingResults[req.params.userId];
+  if (!result) return res.json({ ready: false });
+  delete accountingResults[req.params.userId];
+  res.json({ ready: true, ...result });
+});
+
+app.get('/accounting/download/:filename', (req, res) => {
+  const filepath = require('path').join(__dirname, '../data', req.params.filename);
+  res.download(filepath);
+});
+// ── END ACCOUNTING ROUTES ─────────────────────────────────────────
 
 // Audio endpoint — receives audio buffer, transcribes, then sends to /chat
 app.post('/audio', async (req, res) => {
