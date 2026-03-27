@@ -64,7 +64,7 @@ app.post('/chat', async (req, res) => {
       const traveler = session.travelerProfile;
       console.log(`🤖 Triggering autofill for ${traveler.firstName}...`);
 
-      airlineAutofill({
+      kayakAutofill({
         origin: travelInfo.origin,
         destination: travelInfo.destination,
         departure_date: travelInfo.departure_date,

@@ -4,11 +4,10 @@ const { getStealthContext, injectStealth, simulateHuman } = require('../../utils
 let lastRequest = 0;
 
 async function searchAirbnb({ destination, checkin, checkout, travelers = 1 }) {
-  const wait = 15000 - (Date.now() - lastRequest);
+  const wait = 12000 - (Date.now() - lastRequest);
   if (wait > 0) await new Promise(r => setTimeout(r, wait));
   lastRequest = Date.now();
 
-  // Direct Airbnb link for user to book
   const bookingLink = `https://www.airbnb.com/s/${encodeURIComponent(destination)}/homes?checkin=${checkin}&checkout=${checkout}&adults=${travelers}`;
 
   let browser;
@@ -22,57 +21,37 @@ async function searchAirbnb({ destination, checkin, checkout, travelers = 1 }) {
     await injectStealth(context);
     const page = await context.newPage();
 
-    // Strategy: search Google for Airbnb listings in destination
-    const googleQuery = `airbnb ${destination} ${checkin} to ${checkout} ${travelers} guest`;
-    await page.goto(`https://www.airbnb.com/s/${encodeURIComponent(destination)}/homes?checkin=${checkin}&checkout=${checkout}&adults=${travelers}&price_max=200`, {
-      waitUntil: 'networkidle',
-      timeout: 45000
-    });
-    await simulateHuman(page);
+    // Use domcontentloaded + manual wait (networkidle times out on Airbnb)
+    await page.goto(bookingLink, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(8000);
 
     const listings = await page.evaluate(() => {
       const results = [];
       const seen = new Set();
-
-      // Try multiple selector strategies
-      const cardSelectors = [
-        '[data-testid="card-container"]',
-        '[itemprop="itemListElement"]',
-        '[class*="listingCard"]',
-        '[class*="c1l1h97y"]', // Airbnb's obfuscated class
-        'div[id*="listing"]'
-      ];
-
-      let cards = [];
-      for (const sel of cardSelectors) {
-        const found = document.querySelectorAll(sel);
-        if (found.length > 0) { cards = found; break; }
-      }
-
-      // If no cards found, try extracting from page text
-      if (cards.length === 0) {
-        const priceMatches = document.body.innerText.match(/\$[\d,]+\s*(CAD|USD)?\s*(per night|total|\/night)?/g);
-        if (priceMatches) {
-          priceMatches.slice(0, 5).forEach((price, i) => {
-            results.push({ name: `Airbnb listing ${i+1}`, price, rating: 'N/A', source: 'Airbnb' });
-          });
-        }
-        return results;
-      }
+      const cards = document.querySelectorAll('[data-testid="card-container"]');
 
       cards.forEach((card, i) => {
-        if (i >= 5) return;
-        const name = card.querySelector('[data-testid="listing-card-title"], h3, [class*="title"]')?.textContent?.trim()
-          || `Airbnb in ${document.title.replace('Airbnb', '').trim()}`;
+        if (i >= 6) return;
+
+        const name = card.querySelector('[data-testid="listing-card-title"]')?.textContent?.trim()
+                  || card.querySelector('h3, [class*="title"]')?.textContent?.trim()
+                  || 'Airbnb listing';
+
+        // Extract prices from card text — first price is usually per-night or total
         const cardText = card.innerText || '';
-        const priceMatch = cardText.match(/\$[\d,]+/);
-        const price = priceMatch ? priceMatch[0] + ' total' : 'Ver precios';
-        const rating = card.querySelector('[class*="rating"]')?.textContent?.trim();
+        const prices = cardText.match(/\$[\d,]+/g) || [];
+        const price = prices[0] ? prices[0] + (prices[1] && prices[1] !== prices[0] ? ` (original: ${prices[1]})` : '') : 'Ver precios';
+
+        // Extract rating
+        const ratingMatch = cardText.match(/([\d.]+)\s*\(([\d,]+)\)/);
+        const rating = ratingMatch ? `${ratingMatch[1]} (${ratingMatch[2]} reviews)` : 'New';
+
+        // Get direct link
         const link = card.querySelector('a')?.href;
 
         if (!seen.has(name + price)) {
           seen.add(name + price);
-          results.push({ name, price, rating: rating || 'N/A', link, source: 'Airbnb' });
+          results.push({ name, price, rating, link, source: 'Airbnb' });
         }
       });
 
@@ -82,14 +61,7 @@ async function searchAirbnb({ destination, checkin, checkout, travelers = 1 }) {
     return { source: 'Airbnb', listings, bookingLink };
 
   } catch (error) {
-    // Even if scraping fails, return the booking link
-    return { 
-      source: 'Airbnb', 
-      listings: [],
-      bookingLink,
-      fallback: true,
-      error: error.message 
-    };
+    return { source: 'Airbnb', listings: [], bookingLink, error: error.message };
   } finally {
     if (browser) await browser.close();
   }
