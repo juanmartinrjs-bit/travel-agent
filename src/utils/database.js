@@ -23,6 +23,14 @@ db.exec(`
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch())
   );
+
+  CREATE TABLE IF NOT EXISTS gmail_tokens (
+    user_id TEXT PRIMARY KEY,
+    tokens TEXT NOT NULL,
+    email TEXT DEFAULT NULL,
+    connected_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+  );
 `);
 
 // Get session from DB
@@ -90,4 +98,27 @@ function getAllSessions() {
   return db.prepare('SELECT user_id, updated_at FROM sessions ORDER BY updated_at DESC').all();
 }
 
-module.exports = { getSession, updateSession, clearSession, getAllSessions };
+
+// Gmail token persistence
+function saveGmailTokens(userId, tokens, email = null) {
+  db.prepare(`
+    INSERT INTO gmail_tokens (user_id, tokens, email, updated_at)
+    VALUES (?, ?, ?, unixepoch())
+    ON CONFLICT(user_id) DO UPDATE SET
+      tokens = excluded.tokens,
+      email = excluded.email,
+      updated_at = unixepoch()
+  `).run(userId, JSON.stringify(tokens), email);
+}
+
+function getGmailTokens(userId) {
+  const row = db.prepare('SELECT tokens, email FROM gmail_tokens WHERE user_id = ?').get(userId);
+  if (!row) return null;
+  return { tokens: JSON.parse(row.tokens), email: row.email };
+}
+
+function isGmailConnected(userId) {
+  return !!db.prepare('SELECT user_id FROM gmail_tokens WHERE user_id = ?').get(userId);
+}
+
+module.exports = { getSession, updateSession, clearSession, getAllSessions, saveGmailTokens, getGmailTokens, isGmailConnected };

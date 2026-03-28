@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { chat, extractTravelInfo, detectActions, cleanResponse } = require('./agent/claude');
 const { searchEverything } = require('./search/index');
-const { getSession, updateSession } = require('./utils/database');
+const { getSession, updateSession, saveGmailTokens, getGmailTokens, isGmailConnected } = require('./utils/database');
 const { transcribeAudio } = require('./utils/audio');
 const { kayakAutofill } = require('./booking/kayak-autofill');
 const { airlineAutofill } = require('./booking/airline-autofill');
@@ -187,7 +187,6 @@ app.get('/book/result/:userId', (req, res) => {
 });
 
 // ── ACCOUNTING AGENT ROUTES ───────────────────────────────────────
-const accountingTokens = {};
 const accountingResults = {};
 
 app.get('/auth/gmail', (req, res) => {
@@ -200,11 +199,13 @@ app.get('/auth/callback', async (req, res) => {
   const userId = req.query.state || 'default';
   try {
     const tokens = await getTokens(code);
-    accountingTokens[userId] = tokens;
+    // Save tokens to DB — persists across restarts
+    saveGmailTokens(userId, tokens);
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px">
       <h2>✅ Gmail conectado!</h2>
       <p>Ya podés generar tu reporte P&L.</p>
-      <script>window.close();</script>
+      <p style="color:#666;font-size:14px">No necesitás volver a conectar. Tu acceso quedó guardado.</p>
+      <script>setTimeout(() => window.close(), 2000);</script>
     </body></html>`);
   } catch (e) {
     res.status(500).send('Error: ' + e.message);
@@ -217,8 +218,9 @@ app.get('/auth/url', (req, res) => {
 
 app.post('/accounting/generate', async (req, res) => {
   const { userId } = req.body;
-  const tokens = accountingTokens[userId];
-  if (!tokens) return res.status(401).json({ error: 'Gmail not connected. Call /auth/gmail first.' });
+  const gmailData = getGmailTokens(userId);
+  if (!gmailData) return res.status(401).json({ error: 'Gmail not connected. Call /auth/gmail first.' });
+  const tokens = gmailData.tokens;
 
   res.json({ status: 'processing', message: '📧 Leyendo emails y generando reporte... (1-2 min)' });
 
@@ -256,6 +258,11 @@ app.get('/accounting/result/:userId', (req, res) => {
   if (!result) return res.json({ ready: false });
   delete accountingResults[req.params.userId];
   res.json({ ready: true, ...result });
+});
+
+app.get('/accounting/status/:userId', (req, res) => {
+  const connected = isGmailConnected(req.params.userId);
+  res.json({ connected, message: connected ? '✅ Gmail conectado' : '❌ Gmail no conectado' });
 });
 
 app.get('/accounting/download/:filename', (req, res) => {

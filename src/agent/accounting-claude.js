@@ -5,7 +5,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // Extract transaction data from email
 async function extractTransaction(email) {
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 300,
     messages: [{
       role: 'user',
@@ -47,7 +47,7 @@ async function generateSummary(transactions) {
   const netProfit = totalIncome - totalExpense;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 600,
     messages: [{
       role: 'user',
