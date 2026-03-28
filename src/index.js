@@ -9,6 +9,7 @@ const { airlineAutofill } = require('./booking/airline-autofill');
 const { getAuthUrl, getTokens, fetchPaymentEmails } = require('./utils/gmail');
 const { extractTransaction, generateSummary } = require('./agent/accounting-claude');
 const { generateExcel } = require('./utils/excel-generator');
+const { normalizeTransactions } = require('./utils/currency');
 
 const path = require('path');
 const app = express();
@@ -237,8 +238,10 @@ app.post('/accounting/generate', async (req, res) => {
         accountingResults[userId] = { error: 'No se encontraron transacciones.' };
         return;
       }
-      const summary = await generateSummary(transactions);
-      const { filepath, filename } = generateExcel(transactions, summary, userId);
+      // Convert all amounts to CAD
+      const normalizedTx = await normalizeTransactions(transactions);
+      const summary = await generateSummary(normalizedTx);
+      const { filepath, filename } = generateExcel(normalizedTx, summary, userId);
       accountingResults[userId] = {
         transactions: transactions.length, summary, filename,
         downloadUrl: `/accounting/download/${filename}`,

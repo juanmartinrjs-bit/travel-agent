@@ -9,23 +9,31 @@ async function extractTransaction(email) {
     max_tokens: 300,
     messages: [{
       role: 'user',
-      content: `Extract financial transaction data from this email. Return ONLY valid JSON or null if not a transaction.
+      content: `Extract financial transaction data from this email. Be generous — if there's any dollar amount mentioned, extract it.
+Return ONLY valid JSON or the word null if there's absolutely no money involved.
 
 Email:
 Subject: ${email.subject}
 From: ${email.from}
 Date: ${email.date}
-Body: ${email.body}
+Body: ${email.body?.substring(0, 500)}
 
-Return this format:
+Examples of what to extract:
+- Interac transfer received/sent → income or expense
+- Receipt from Apple/store → expense
+- Payment receipt → could be income or expense
+- Rent reminder → expense
+- Bank statement → skip (no specific transaction)
+
+Return JSON:
 {
   "date": "YYYY-MM-DD",
-  "amount": number (positive for income, negative for expense),
-  "currency": "USD or COP or EUR etc",
-  "description": "brief description",
-  "category": "one of: Income/Sales/Subscription/Salary/Transfer/Refund/Software/Marketing/Services/Other",
+  "amount": number (always positive),
+  "currency": "CAD or USD or COP or EUR",
+  "description": "brief description max 50 chars",
+  "category": "Income/Transfer/Subscription/Shopping/Rent/Services/Software/Food/Other",
   "type": "income or expense",
-  "source": "sender/platform name",
+  "source": "platform or sender name",
   "confidence": "high or medium or low"
 }`
     }]
@@ -33,8 +41,10 @@ Return this format:
 
   try {
     const text = response.content[0].text.trim();
-    if (text === 'null' || !text.startsWith('{')) return null;
-    return JSON.parse(text);
+    if (text.toLowerCase() === 'null' || text.toLowerCase().startsWith('null')) return null;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    return JSON.parse(jsonMatch[0]);
   } catch (e) {
     return null;
   }

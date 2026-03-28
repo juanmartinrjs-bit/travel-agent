@@ -7,7 +7,7 @@ function generateExcel(transactions, summary, userId) {
 
   // ── Sheet 1: All Transactions ──────────────────────────────────
   const txData = [
-    ['Date', 'Description', 'Category', 'Type', 'Amount', 'Currency', 'Source', 'Confidence']
+    ['Date', 'Description', 'Category', 'Type', 'Amount (CAD)', 'Original Amount', 'Original Currency', 'Source', 'Confidence']
   ];
 
   transactions.forEach(t => {
@@ -17,7 +17,8 @@ function generateExcel(transactions, summary, userId) {
       t.category,
       t.type,
       t.amount,
-      t.currency || 'USD',
+      t.originalAmount || t.amount,
+      t.originalCurrency || t.currency || 'CAD',
       t.source,
       t.confidence
     ]);
@@ -28,7 +29,7 @@ function generateExcel(transactions, summary, userId) {
   // Style header row
   txSheet['!cols'] = [
     { wch: 12 }, { wch: 35 }, { wch: 15 }, { wch: 10 },
-    { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 12 }
+    { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 12 }
   ];
 
   XLSX.utils.book_append_sheet(wb, txSheet, 'Transactions');
